@@ -8,37 +8,58 @@ let currentMultiplier = 1;
 let crashPoint = 0;
 let interval = null;
 let players = [];
-let connectedUsers = 0;
-let gameLoopActive = false;
-
 
 function gameSocket(io) {
   io.on('connection', (socket) => {
     console.log(`Player connected: ${socket.id}`);
-    connectedUsers++;
-  
-    if (connectedUsers === 1 && !gameLoopActive) {
-      console.log("🟢 First user joined — starting game loop");
-      gameLoopActive = true;
-      startNewRound(io);
-    }
-  
-    socket.on('disconnect', () => {
-      connectedUsers--;
-      console.log(`Player disconnected: ${socket.id}`);
-      
-      if (connectedUsers === 0 && gameLoopActive) {
-        console.log("🔴 No users left — stopping game loop");
-        gameLoopActive = false;
-        clearInterval(interval); // stop multiplier update
-        isRoundActive = false;
-        players = [];
+
+    socket.on('join_game', () => {
+      socket.emit('welcome', { msg: 'Joined game' });
+    });
+
+    socket.on('place_bet', (data) => {
+      if (!isRoundActive) {
+        players.push({ socketId: socket.id, ...data, hasCashedOut: false });
+        socket.emit('bet_placed', { success: true });
+      } else {
+        socket.emit('bet_placed', { success: false, msg: 'Round already started' });
       }
     });
-  
-    // existing place_bet, cashout handlers here...
+
+    socket.on('cashout', async () => {
+      const player = players.find(p => p.socketId === socket.id && !p.hasCashedOut);
+
+      if (player && isRoundActive && currentMultiplier < crashPoint) {
+        player.hasCashedOut = true;
+        const payout = player.cryptoAmount * currentMultiplier;
+        const currency = player.cryptoType || 'BTC'; // fallback to BTC
+
+        try {
+          const playerDoc = await Player.findOne({ playerId: player.playerId });
+
+          if (playerDoc) {
+            playerDoc.wallet[currency] += payout;
+            await playerDoc.save();
+
+            io.emit('player_cashout', {
+              playerId: player.playerId,
+              payout,
+              currency,
+              multiplier: currentMultiplier
+            });
+
+            console.log(`✅ ${player.playerId} cashed out ${payout} ${currency} at ${currentMultiplier.toFixed(2)}x`);
+          } else {
+            console.warn(`⚠️ Player ${player.playerId} not found`);
+          }
+        } catch (error) {
+          console.error('❌ Error updating wallet:', error);
+        }
+      } else {
+        socket.emit('cashout_failed', { msg: 'Too late or no active bet' });
+      }
+    });
   });
-  
 
   // ✅ Start the first round after server starts
   setTimeout(() => {
@@ -77,26 +98,16 @@ async function startNewRound(io) {
   }, 100); // update every 100ms
 }
 
-async function endRound(io) {
-  if (!gameLoopActive) return;
-
+function endRound(io) {
   console.log(`💥 Ending round ${roundNumber} at ${currentMultiplier.toFixed(2)}x`);
   isRoundActive = false;
   roundNumber++;
   players = [];
 
-  if (currentRound) {
-    currentRound.endTime = new Date();
-    await currentRound.save();
-    currentRound = null;
-  }
-
   io.emit('waiting', { msg: 'Next round starts in 10 seconds' });
 
   setTimeout(() => {
-    if (gameLoopActive) {
-      startNewRound(io);
-    }
+    startNewRound(io);
   }, 10000);
 }
 
