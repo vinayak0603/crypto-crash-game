@@ -16,7 +16,7 @@ const cors = require('cors');
 
 // ✅ Allow requests from frontend
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'crashpoint.netlify.app',
   methods: ['GET', 'POST'],
   credentials: true
 }));
