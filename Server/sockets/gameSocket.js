@@ -11,7 +11,7 @@ let players = [];
 
 function gameSocket(io) {
   io.on('connection', (socket) => {
-    console.log(`Player connected: ${socket.id}`);
+    console.log(`🔌 Player connected: ${socket.id}`);
 
     socket.on('join_game', () => {
       socket.emit('welcome', { msg: 'Joined game' });
@@ -32,12 +32,15 @@ function gameSocket(io) {
       if (player && isRoundActive && currentMultiplier < crashPoint) {
         player.hasCashedOut = true;
         const payout = player.cryptoAmount * currentMultiplier;
-        const currency = player.cryptoType || 'BTC'; // fallback to BTC
+        const currency = player.cryptoType || 'BTC';
 
         try {
           const playerDoc = await Player.findOne({ playerId: player.playerId });
 
           if (playerDoc) {
+            if (!playerDoc.wallet) playerDoc.wallet = {};
+            if (!playerDoc.wallet[currency]) playerDoc.wallet[currency] = 0;
+
             playerDoc.wallet[currency] += payout;
             await playerDoc.save();
 
@@ -54,6 +57,7 @@ function gameSocket(io) {
           }
         } catch (error) {
           console.error('❌ Error updating wallet:', error);
+          socket.emit('cashout_failed', { msg: 'Server error during cashout' });
         }
       } else {
         socket.emit('cashout_failed', { msg: 'Too late or no active bet' });
@@ -61,7 +65,7 @@ function gameSocket(io) {
     });
   });
 
-  // ✅ Start the first round after server starts
+  // Start the first round shortly after server starts
   setTimeout(() => {
     startNewRound(io);
   }, 1000);
@@ -95,13 +99,22 @@ async function startNewRound(io) {
       io.emit('round_crash', { crashPoint: crashPoint.toFixed(2) });
       endRound(io);
     }
-  }, 100); // update every 100ms
+  }, 100);
 }
 
-function endRound(io) {
+async function endRound(io) {
   console.log(`💥 Ending round ${roundNumber} at ${currentMultiplier.toFixed(2)}x`);
   isRoundActive = false;
-  roundNumber++;
+
+  // ✅ Reset logic after 100 rounds
+  if (roundNumber >= 100) {
+    console.log('🧹 Reached 100 rounds — clearing history and restarting from round 1...');
+    await GameRound.deleteMany({});
+    roundNumber = 1;
+  } else {
+    roundNumber++;
+  }
+
   players = [];
 
   io.emit('waiting', { msg: 'Next round starts in 10 seconds' });
@@ -112,4 +125,3 @@ function endRound(io) {
 }
 
 module.exports = gameSocket;
-
