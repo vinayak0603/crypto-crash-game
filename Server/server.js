@@ -16,7 +16,7 @@ const cors = require('cors');
 
 // ✅ Allow requests from frontend
 app.use(cors({
-  origin: 'crashpoint.netlify.app',
+  origin: 'https://crashpoint.netlify.app',
   methods: ['GET', 'POST'],
   credentials: true
 }));
