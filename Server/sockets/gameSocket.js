@@ -39,43 +39,30 @@ function gameSocket(io) {
 
     socket.on('cashout', async () => {
       const player = players.find(p => p.socketId === socket.id && !p.hasCashedOut);
-
-      console.log(`[Cashout] Request from ${socket.id}`);
-
-      if (!player) {
-        console.log('❌ No valid bet or already cashed out');
-        socket.emit('cashout_failed', { msg: 'No valid bet or already cashed out' });
+    
+      if (!player || !isRoundActive || currentMultiplier >= crashPoint) {
+        socket.emit('cashout_failed', { msg: 'Too late or no active bet' });
         return;
       }
-
-      if (!isRoundActive || currentMultiplier >= crashPoint) {
-        console.log('❌ Too late to cash out');
-        socket.emit('cashout_failed', { msg: 'Too late! Round already crashed' });
-        return;
-      }
-
+    
       player.hasCashedOut = true;
       const payout = player.cryptoAmount * currentMultiplier;
       const currency = player.cryptoType || 'BTC';
-
+    
       try {
         const playerDoc = await Player.findOne({ playerId: player.playerId });
-
+    
         if (!playerDoc) {
-          console.warn('⚠️ Player not found in DB');
-          socket.emit('cashout_failed', { msg: 'Player not found' });
-          return;
+          throw new Error('Player not found in DB');
         }
-
-        // Ensure currency field exists
-        if (!playerDoc.wallet[currency]) {
-          playerDoc.wallet[currency] = 0;
-        }
-
+    
+        // ✅ Ensure wallet and currency field exist
+        if (!playerDoc.wallet) playerDoc.wallet = {};
+        if (!playerDoc.wallet[currency]) playerDoc.wallet[currency] = 0;
+    
         playerDoc.wallet[currency] += payout;
         await playerDoc.save();
-
-        // Log cashout in round history
+    
         if (currentRound) {
           currentRound.cashouts.push({
             playerId: player.playerId,
@@ -87,21 +74,20 @@ function gameSocket(io) {
           });
           await currentRound.save();
         }
-
+    
         io.emit('player_cashout', {
           playerId: player.playerId,
           payout,
           currency,
           multiplier: currentMultiplier
         });
-
-        console.log(`✅ ${player.playerId} cashed out ${payout} ${currency} at ${currentMultiplier.toFixed(2)}x`);
-
+    
       } catch (err) {
         console.error('❌ Error during cashout:', err);
-        socket.emit('cashout_failed', { msg: 'Server error' });
+        socket.emit('cashout_failed', { msg: err.message || 'Server error' });
       }
     });
+    
 
     socket.on('disconnect', () => {
       connectedUsers--;
