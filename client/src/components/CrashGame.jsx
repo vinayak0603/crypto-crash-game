@@ -20,7 +20,7 @@ export default function CrashGame() {
 
   const fetchWallet = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/wallet/${playerId}`);
+      const res = await axios.get(`https://crypto-crash-game.onrender.com/api/wallet/${playerId}`);
       setWallet(res.data.crypto);
       setUsdWallet(res.data.usd);
     } catch (err) {
@@ -30,7 +30,7 @@ export default function CrashGame() {
   };
 
   useEffect(() => {
-    socket.current = io('http://localhost:5000');
+    socket.current = io('https://crypto-crash-game.onrender.com');
     socket.current.emit('join_game');
     fetchWallet();
 
@@ -97,7 +97,7 @@ export default function CrashGame() {
     }
 
     try {
-      const res = await axios.post('http://localhost:5000/api/bet', {
+      const res = await axios.post('https://crypto-crash-game.onrender.com/api/bet', {
         playerId,
         usdAmount: parseFloat(betAmount),
         cryptoType: crypto,
