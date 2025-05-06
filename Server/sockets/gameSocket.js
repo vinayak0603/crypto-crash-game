@@ -40,47 +40,66 @@ function gameSocket(io) {
     socket.on('cashout', async () => {
       const player = players.find(p => p.socketId === socket.id && !p.hasCashedOut);
 
-      if (player && isRoundActive && currentMultiplier < crashPoint) {
-        player.hasCashedOut = true;
-        const payout = player.cryptoAmount * currentMultiplier;
-        const currency = player.cryptoType || 'BTC';
+      console.log(`[Cashout] Request from ${socket.id}`);
 
-        try {
-          const playerDoc = await Player.findOne({ playerId: player.playerId });
+      if (!player) {
+        console.log('❌ No valid bet or already cashed out');
+        socket.emit('cashout_failed', { msg: 'No valid bet or already cashed out' });
+        return;
+      }
 
-          if (playerDoc) {
-            playerDoc.wallet[currency] += payout;
-            await playerDoc.save();
+      if (!isRoundActive || currentMultiplier >= crashPoint) {
+        console.log('❌ Too late to cash out');
+        socket.emit('cashout_failed', { msg: 'Too late! Round already crashed' });
+        return;
+      }
 
-            // Store cashout in current round
-            if (currentRound) {
-              currentRound.cashouts.push({
-                playerId: player.playerId,
-                payout,
-                multiplier: currentMultiplier,
-                currency,
-                usdAmount: 0, // Optional: convert if needed
-                timestamp: new Date()
-              });
-              await currentRound.save();
-            }
+      player.hasCashedOut = true;
+      const payout = player.cryptoAmount * currentMultiplier;
+      const currency = player.cryptoType || 'BTC';
 
-            io.emit('player_cashout', {
-              playerId: player.playerId,
-              payout,
-              currency,
-              multiplier: currentMultiplier
-            });
+      try {
+        const playerDoc = await Player.findOne({ playerId: player.playerId });
 
-            console.log(`✅ ${player.playerId} cashed out ${payout} ${currency} at ${currentMultiplier.toFixed(2)}x`);
-          } else {
-            console.warn(`⚠️ Player ${player.playerId} not found`);
-          }
-        } catch (error) {
-          console.error('❌ Error updating wallet:', error);
+        if (!playerDoc) {
+          console.warn('⚠️ Player not found in DB');
+          socket.emit('cashout_failed', { msg: 'Player not found' });
+          return;
         }
-      } else {
-        socket.emit('cashout_failed', { msg: 'Too late or no active bet' });
+
+        // Ensure currency field exists
+        if (!playerDoc.wallet[currency]) {
+          playerDoc.wallet[currency] = 0;
+        }
+
+        playerDoc.wallet[currency] += payout;
+        await playerDoc.save();
+
+        // Log cashout in round history
+        if (currentRound) {
+          currentRound.cashouts.push({
+            playerId: player.playerId,
+            payout,
+            multiplier: currentMultiplier,
+            currency,
+            usdAmount: 0,
+            timestamp: new Date()
+          });
+          await currentRound.save();
+        }
+
+        io.emit('player_cashout', {
+          playerId: player.playerId,
+          payout,
+          currency,
+          multiplier: currentMultiplier
+        });
+
+        console.log(`✅ ${player.playerId} cashed out ${payout} ${currency} at ${currentMultiplier.toFixed(2)}x`);
+
+      } catch (err) {
+        console.error('❌ Error during cashout:', err);
+        socket.emit('cashout_failed', { msg: 'Server error' });
       }
     });
 
